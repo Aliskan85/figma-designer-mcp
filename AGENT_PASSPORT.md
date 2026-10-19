@@ -1,5 +1,7 @@
 # Agent passport: Figma Designer MCP
 
+**English** · [Русский](AGENT_PASSPORT.ru.md)
+
 For AI agents (Claude Code, Cursor, OpenClaw, ZCode, AutoClaw and any other MCP client) that must design in Figma through this server.
 
 ## 1. What this is
@@ -38,7 +40,7 @@ Never pick "Talk To Figma MCP Plugin" from the main list. Do not use "Run last p
 
 **Proof that it is the right plugin** (do this every time): the window title is "Cursor MCP Plugin" **and** a toolkit call succeeds, for example `manage_pages` with `{"action":"LIST"}` or a test `create_shape`. `Unknown command` means the wrong plugin (or an old copy) is running.
 
-**Tested with agents:** agents running in AutoClaw successfully tested this plugin and can work with it (reported by the maintainer). Confirmed setup: Figma desktop on Windows, free plan, local plugin, relay and local MCP server as described here.
+**Tested with agents:** agents running in AutoClaw 1.17.8 successfully tested this plugin and can work with it (reported by the maintainer). Confirmed setup: Figma desktop on Windows, free plan, local plugin, relay and local MCP server as described here.
 
 ## 4. Connecting the MCP server
 

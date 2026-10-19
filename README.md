@@ -1,5 +1,7 @@
 # Figma Designer MCP (Talk to Figma MCP + Designer Toolkit)
 
+**English** · [Русский](README.ru.md) · Agent passport: [English](AGENT_PASSPORT.md) · [Русский](AGENT_PASSPORT.ru.md)
+
 **Let an AI agent (Claude Code, Cursor, OpenClaw and any MCP client) design in Figma: wireframes, UI screens, design systems and clickable prototypes with animations.** Works with a **free Figma account** and the desktop app.
 
 This is a fork of [grab/cursor-talk-to-figma-mcp](https://github.com/grab/cursor-talk-to-figma-mcp) (MIT). The original project reads designs and creates basic frames, rectangles and text. This fork adds a **Designer Toolkit**: typed commands for everything a web designer does, without ever executing arbitrary code.
@@ -32,7 +34,7 @@ Verified on a live Figma file (free plan, desktop app): shapes, rotated lines, g
 
 ### Tested with agents
 
-Agents running in **AutoClaw** have successfully tested this plugin and can work with it (reported by the maintainer). The confirmed setup: Figma desktop app on Windows, free Figma plan, local plugin from this repository, relay (`bun run src/socket.ts`) and the local MCP server. The same build should work for you and your agents. The toolkit was also exercised directly by Claude Code (see Status above). If you confirm it with another agent, please open an issue or pull request to extend this list.
+Agents running in **AutoClaw 1.17.8** have successfully tested this plugin and can work with it (reported by the maintainer). The confirmed setup: Figma desktop app on Windows, free Figma plan, local plugin from this repository, relay (`bun run src/socket.ts`) and the local MCP server. The same build should work for you and your agents. The toolkit was also exercised directly by Claude Code (see Status above). If you confirm it with another agent, please open an issue or pull request to extend this list.
 
 ### Use it with AI agents
 
