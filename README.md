@@ -30,11 +30,24 @@ The WebSocket relay listens on `localhost:3055` **without authentication**: any 
 
 Verified on a live Figma file (free plan, desktop app): shapes, rotated lines, gradients with shadows, SVG import, wrapped text styling, auto layout, placeholders, font listing, node search, pages, and a Smart Animate prototype reaction. Written but not yet exercised in real use: variables and styles, component variants, boolean operations, masks, layout grids. Issues and pull requests are welcome.
 
+### Tested with agents
+
+Agents running in **AutoClaw** have successfully tested this plugin and can work with it (reported by the maintainer). The confirmed setup: Figma desktop app on Windows, free Figma plan, local plugin from this repository, relay (`bun run src/socket.ts`) and the local MCP server. The same build should work for you and your agents. The toolkit was also exercised directly by Claude Code (see Status above). If you confirm it with another agent, please open an issue or pull request to extend this list.
+
 ### Use it with AI agents
 
 See [AGENT_PASSPORT.md](AGENT_PASSPORT.md): setup, working order, tips, error table, and an unattended-launch procedure for agents that can control the desktop. A smoke test that exercises the toolkit lives in [scripts/smoke-test.js](scripts/smoke-test.js).
 
-**Important:** run the plugin from this repository (Plugins > Development > Import plugin from manifest > `src/cursor_mcp_plugin/manifest.json`), not the community version. The community build does not contain the Designer Toolkit commands and answers `Unknown command`. Point your MCP client at the local `src/talk_to_figma_mcp/server.ts`:
+**Important: run the right plugin.** Figma may show two similar plugins:
+
+| | Right one (this repository) | Wrong one (Community build) |
+|---|---|---|
+| Where | **Plugins > Development > Cursor MCP Plugin** | main Plugins list, Saved plugins or Community: "Talk To Figma MCP Plugin" |
+| Window title | **Cursor MCP Plugin** | Talk To Figma MCP Plugin (with a TTF icon) |
+| Heading inside the window | Cursor MCP Plugin, "Designer Toolkit build" | Talk To Figma MCP Plugin |
+| Designer Toolkit commands | work | answer `Unknown command` |
+
+Import it once: Plugins > Development > Import plugin from manifest > `src/cursor_mcp_plugin/manifest.json`. Do not use "Run last plugin" unless the last one was this plugin. Do not rely on the name alone: confirm with the window title and with a successful `create_shape` (or `manage_pages` with `LIST`). Then point your MCP client at the local `src/talk_to_figma_mcp/server.ts`:
 
 ```json
 {
@@ -90,7 +103,7 @@ bun setup
 bun socket
 ```
 
-4. **NEW** Install Figma plugin from [Figma community page](https://www.figma.com/community/plugin/1485687494525374295/cursor-talk-to-figma-mcp-plugin) or [install locally](#figma-plugin)
+4. Install the Figma plugin **locally** from this repository ([instructions](#figma-plugin)). For this fork do **not** use the Community version ("Talk To Figma MCP Plugin"): it does not contain the Designer Toolkit commands.
 
 ## Quick Video Tutorial
 

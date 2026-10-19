@@ -25,7 +25,20 @@ The plugin menu only exists **inside an open file**. Use the **local** plugin fr
 1. One-time import: **Plugins > Development > Import plugin from manifest...** and choose `src/cursor_mcp_plugin/manifest.json`.
 2. Run it: main menu (Figma logo, top-left) > **Plugins > Development > Cursor MCP Plugin**.
 
-Do **not** run "Talk To Figma MCP Plugin" from the Community or Saved plugins, and do not use "Run last plugin" unless the last one was the local plugin. The community build has no Designer Toolkit commands and answers `Unknown command`. The window title of the right plugin is "Cursor MCP Plugin".
+**Two similar plugins exist; only one is right.** Do not trust the name alone: a familiar name is the usual trap.
+
+| | RIGHT (this repo) | WRONG (Community build) |
+|---|---|---|
+| Menu path | **Plugins > Development > Cursor MCP Plugin** | main Plugins list, Saved plugins or Community: **"Talk To Figma MCP Plugin"** |
+| Window title | **Cursor MCP Plugin** | Talk To Figma MCP Plugin (TTF icon) |
+| Heading inside the window | Cursor MCP Plugin, "Designer Toolkit build" | Talk To Figma MCP Plugin |
+| Designer Toolkit commands | work | answer `Unknown command` |
+
+Never pick "Talk To Figma MCP Plugin" from the main list. Do not use "Run last plugin" unless the last one was the local plugin. If you ran the wrong one, close its window and run the right one.
+
+**Proof that it is the right plugin** (do this every time): the window title is "Cursor MCP Plugin" **and** a toolkit call succeeds, for example `manage_pages` with `{"action":"LIST"}` or a test `create_shape`. `Unknown command` means the wrong plugin (or an old copy) is running.
+
+**Tested with agents:** agents running in AutoClaw successfully tested this plugin and can work with it (reported by the maintainer). Confirmed setup: Figma desktop on Windows, free plan, local plugin, relay and local MCP server as described here.
 
 ## 4. Connecting the MCP server
 
@@ -86,8 +99,8 @@ Requirement: the agent can run shell commands and control the desktop (screensho
 1. **Relay.** Check port 3055; if closed, start `bun run src/socket.ts` in the background and confirm "WebSocket server running on port 3055".
 2. **Figma.** If it is not running, start the desktop app and wait for the home screen (screenshot). The user is normally signed in already; if a sign-in is requested, stop and report.
 3. **File.** Open the latest file from Recents or create one: **Create > Design file**.
-4. **Plugin.** Figma logo (first item of the left menu) > **Plugins > Development > Cursor MCP Plugin**. If the entry is missing, import `src/cursor_mcp_plugin/manifest.json` first (section 3).
-5. **Check.** The window title is "Cursor MCP Plugin" and the green bar is shown. If not connected, press **Connect** (port 3055). Do not close or minimize the window.
+4. **Plugin.** Figma logo (first item of the left menu) > **Plugins > Development > Cursor MCP Plugin**. Never choose "Talk To Figma MCP Plugin" from the main list, Saved plugins or Community (wrong build). If the entry is missing, import `src/cursor_mcp_plugin/manifest.json` first (section 3).
+5. **Check.** The window title is "Cursor MCP Plugin" (not "Talk To Figma MCP Plugin") and the green bar is shown. If not connected, press **Connect** (port 3055). Do not close or minimize the window. Prove it later with a successful toolkit call (section 3).
 6. **Channel code.** Read the 8-character code from a screenshot and double-check every character (0 vs o, l vs 1). Confirm by `join_channel` + `get_document_info`; on timeout, take a new screenshot and retry.
 7. Continue with section 5. Report progress briefly: the user may be reading on a phone. At the end export the key screens and report the file and frame names.
 
