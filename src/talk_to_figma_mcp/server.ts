@@ -3334,6 +3334,321 @@ server.tool(
   }
 );
 
+// ---------------------------------------------------------------------------
+// Designer toolkit: typed tools that forward to the Figma plugin commands of
+// the same name. Colors accept "#rrggbb" / "#rrggbbaa" or {r,g,b,a} (0-1).
+// ---------------------------------------------------------------------------
+function registerDesignTool(
+  name: string,
+  description: string,
+  shape: Record<string, z.ZodTypeAny>,
+  timeoutMs: number = 60000
+) {
+  server.tool(name, description, shape, async (params: any) => {
+    try {
+      const result = await sendCommandToFigma(name as any, params, timeoutMs);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `Error in ${name}: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  });
+}
+
+const paintHelp =
+  'Paint: "#rrggbb[aa]" | {type:"SOLID",color,opacity} | {type:"GRADIENT_LINEAR"|"GRADIENT_RADIAL"|"GRADIENT_ANGULAR"|"GRADIENT_DIAMOND", stops:[{position:0..1,color,opacity?}], angle?: CSS degrees for linear (0=to top, 90=to right, 180=to bottom), opacity?}';
+const effectHelp =
+  'Effect: {type:"DROP_SHADOW"|"INNER_SHADOW", color, offsetX, offsetY, blur, spread, showBehind?} | {type:"LAYER_BLUR"|"BACKGROUND_BLUR", radius}';
+
+registerDesignTool(
+  "create_shape",
+  "Create a RECTANGLE, ELLIPSE, LINE, POLYGON or STAR with full styling. For a LINE, width is its length and height is ignored; use rotation (degrees, counter-clockwise positive, so a line going down-right needs a negative angle) to make diagonals. " +
+    paintHelp,
+  {
+    type: z.enum(["RECTANGLE", "ELLIPSE", "LINE", "POLYGON", "STAR"]),
+    x: z.number().optional().describe("X relative to the parent (default 0)"),
+    y: z.number().optional().describe("Y relative to the parent (default 0)"),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    name: z.string().optional(),
+    parentId: z.string().optional().describe("Parent frame/group/page-child node id"),
+    fills: z.array(z.any()).optional().describe("Array of paints"),
+    strokes: z.array(z.any()).optional().describe("Array of paints"),
+    strokeWeight: z.number().optional(),
+    strokeAlign: z.enum(["INSIDE", "OUTSIDE", "CENTER"]).optional(),
+    strokeCap: z.string().optional().describe("NONE|ROUND|SQUARE|ARROW_LINES|ARROW_EQUILATERAL"),
+    dashPattern: z.array(z.number()).optional().describe("e.g. [8,4] for dashed"),
+    cornerRadius: z.number().optional(),
+    opacity: z.number().min(0).max(1).optional(),
+    rotation: z.number().optional().describe("Degrees, counter-clockwise, around the top-left origin"),
+    effects: z.array(z.any()).optional().describe(effectHelp),
+    pointCount: z.number().optional().describe("POLYGON/STAR points"),
+    innerRadius: z.number().optional().describe("STAR inner radius ratio 0..1"),
+  }
+);
+
+registerDesignTool(
+  "create_placeholder",
+  "Create a wireframe image placeholder: a framed box with two crossed diagonals and a centered caption with the label and the pixel size. Ideal for low-fidelity layouts.",
+  {
+    x: z.number().optional(),
+    y: z.number().optional(),
+    width: z.number(),
+    height: z.number(),
+    label: z.union([z.string(), z.literal(false)]).optional().describe("What should be here, e.g. 'Hero photo'. false = no caption"),
+    parentId: z.string().optional(),
+    name: z.string().optional(),
+    fill: z.any().optional().describe("Background paint, default #FFFFFF"),
+    stroke: z.any().optional().describe("Line paint, default #000000"),
+    strokeWeight: z.number().optional(),
+    crossWeight: z.number().optional().describe("Diagonal thickness, default 1"),
+    labelSize: z.number().optional(),
+  }
+);
+
+registerDesignTool(
+  "create_from_svg",
+  "Import an SVG string as editable vector layers (icons, logos, illustrations, custom shapes). Use width to scale proportionally.",
+  {
+    svg: z.string().describe("Complete SVG markup"),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    width: z.number().optional(),
+    name: z.string().optional(),
+    parentId: z.string().optional(),
+  }
+);
+
+registerDesignTool(
+  "set_appearance",
+  "Set visual properties of any node: name, visible, locked, opacity, blendMode, fills, strokes, strokeWeight/Align/Cap/Join, dashPattern, cornerRadius (or per-corner), cornerSmoothing, clipsContent, isMask, rotation, x, y, width, height, effects, overflowDirection (NONE|HORIZONTAL|VERTICAL|BOTH for scroll). " +
+    paintHelp + ". " + effectHelp,
+  {
+    nodeId: z.string(),
+    name: z.string().optional(),
+    visible: z.boolean().optional(),
+    locked: z.boolean().optional(),
+    opacity: z.number().min(0).max(1).optional(),
+    blendMode: z.string().optional().describe("NORMAL|MULTIPLY|SCREEN|OVERLAY|DARKEN|LIGHTEN|..."),
+    fills: z.array(z.any()).optional(),
+    strokes: z.array(z.any()).optional(),
+    strokeWeight: z.number().optional(),
+    strokeAlign: z.enum(["INSIDE", "OUTSIDE", "CENTER"]).optional(),
+    strokeCap: z.string().optional(),
+    strokeJoin: z.string().optional(),
+    dashPattern: z.array(z.number()).optional(),
+    cornerRadius: z.number().optional(),
+    topLeftRadius: z.number().optional(),
+    topRightRadius: z.number().optional(),
+    bottomLeftRadius: z.number().optional(),
+    bottomRightRadius: z.number().optional(),
+    cornerSmoothing: z.number().optional(),
+    clipsContent: z.boolean().optional(),
+    isMask: z.boolean().optional(),
+    rotation: z.number().optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    effects: z.array(z.any()).optional(),
+    overflowDirection: z.string().optional(),
+  }
+);
+
+registerDesignTool(
+  "set_effects",
+  "Replace the effects of a node: drop/inner shadows, layer blur, background blur (glassmorphism). " + effectHelp,
+  { nodeId: z.string(), effects: z.array(z.any()) }
+);
+
+registerDesignTool(
+  "set_text_style",
+  "Style a text node: font family/style/weight, size, line height, letter spacing, alignment, case, decoration, color, new characters. Pass width to get a fixed-width, wrapping text block (use this instead of manual line breaks). Font weights map to Thin(100)...Black(900). Use list_fonts to find available fonts.",
+  {
+    nodeId: z.string(),
+    characters: z.string().optional(),
+    fontFamily: z.string().optional(),
+    fontStyle: z.string().optional().describe('e.g. "Bold", "Semi Bold", "Italic"'),
+    fontWeight: z.number().optional().describe("100..900"),
+    fontSize: z.number().optional(),
+    lineHeight: z.union([z.number(), z.literal("AUTO"), z.object({ value: z.number(), unit: z.enum(["PIXELS", "PERCENT"]) })]).optional(),
+    letterSpacing: z.union([z.number(), z.object({ value: z.number(), unit: z.enum(["PIXELS", "PERCENT"]) })]).optional(),
+    textAlignHorizontal: z.enum(["LEFT", "CENTER", "RIGHT", "JUSTIFIED"]).optional(),
+    textAlignVertical: z.enum(["TOP", "CENTER", "BOTTOM"]).optional(),
+    textCase: z.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE"]).optional(),
+    textDecoration: z.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).optional(),
+    textAutoResize: z.enum(["NONE", "WIDTH_AND_HEIGHT", "HEIGHT", "TRUNCATE"]).optional(),
+    paragraphSpacing: z.number().optional(),
+    paragraphIndent: z.number().optional(),
+    fills: z.array(z.any()).optional().describe("Text color paints, e.g. ['#111111']"),
+    width: z.number().optional().describe("Fixed width; text wraps"),
+  }
+);
+
+registerDesignTool(
+  "set_auto_layout",
+  "Configure auto layout on a frame (layoutMode NONE|HORIZONTAL|VERTICAL, wrap, spacing, padding, alignment, sizing) and layout behavior of a child (layoutSizingHorizontal/Vertical FIXED|HUG|FILL, layoutGrow, layoutAlign, layoutPositioning AUTO|ABSOLUTE, min/max width/height).",
+  {
+    nodeId: z.string(),
+    layoutMode: z.enum(["NONE", "HORIZONTAL", "VERTICAL"]).optional(),
+    layoutWrap: z.enum(["NO_WRAP", "WRAP"]).optional(),
+    itemSpacing: z.number().optional(),
+    counterAxisSpacing: z.number().optional(),
+    paddingLeft: z.number().optional(),
+    paddingRight: z.number().optional(),
+    paddingTop: z.number().optional(),
+    paddingBottom: z.number().optional(),
+    primaryAxisAlignItems: z.enum(["MIN", "MAX", "CENTER", "SPACE_BETWEEN"]).optional(),
+    counterAxisAlignItems: z.enum(["MIN", "MAX", "CENTER", "BASELINE"]).optional(),
+    counterAxisAlignContent: z.enum(["AUTO", "SPACE_BETWEEN"]).optional(),
+    primaryAxisSizingMode: z.enum(["FIXED", "AUTO"]).optional(),
+    counterAxisSizingMode: z.enum(["FIXED", "AUTO"]).optional(),
+    layoutSizingHorizontal: z.enum(["FIXED", "HUG", "FILL"]).optional(),
+    layoutSizingVertical: z.enum(["FIXED", "HUG", "FILL"]).optional(),
+    layoutPositioning: z.enum(["AUTO", "ABSOLUTE"]).optional(),
+    layoutAlign: z.string().optional(),
+    layoutGrow: z.number().optional(),
+    minWidth: z.number().nullable().optional(),
+    maxWidth: z.number().nullable().optional(),
+    minHeight: z.number().nullable().optional(),
+    maxHeight: z.number().nullable().optional(),
+    itemReverseZIndex: z.boolean().optional(),
+    strokesIncludedInLayout: z.boolean().optional(),
+  }
+);
+
+registerDesignTool(
+  "set_constraints",
+  "Set responsive constraints of a node inside a non-auto-layout frame.",
+  {
+    nodeId: z.string(),
+    horizontal: z.enum(["MIN", "CENTER", "MAX", "STRETCH", "SCALE"]).optional(),
+    vertical: z.enum(["MIN", "CENTER", "MAX", "STRETCH", "SCALE"]).optional(),
+  }
+);
+
+registerDesignTool(
+  "set_layout_grids",
+  "Set layout grids on a frame (12-column grid, baseline rows, square grid). Grid: {pattern:'COLUMNS'|'ROWS'|'GRID', count, gutterSize, offset, sectionSize, alignment:'MIN'|'MAX'|'CENTER'|'STRETCH', color}",
+  { nodeId: z.string(), layoutGrids: z.array(z.any()) }
+);
+
+registerDesignTool(
+  "arrange_nodes",
+  "Structure and z-order: GROUP, UNGROUP, BOOLEAN_UNION|SUBTRACT|INTERSECT|EXCLUDE, FLATTEN, MASK (first node is the mask), BRING_TO_FRONT, SEND_TO_BACK, REORDER (with index), SET_PARENT (with parentId).",
+  {
+    action: z.enum(["GROUP", "UNGROUP", "BOOLEAN_UNION", "BOOLEAN_SUBTRACT", "BOOLEAN_INTERSECT", "BOOLEAN_EXCLUDE", "FLATTEN", "MASK", "BRING_TO_FRONT", "SEND_TO_BACK", "REORDER", "SET_PARENT"]),
+    nodeIds: z.array(z.string()),
+    parentId: z.string().optional(),
+    index: z.number().optional(),
+  }
+);
+
+registerDesignTool(
+  "create_component",
+  "Convert a node (frame, group, shape) into a reusable component.",
+  { nodeId: z.string(), name: z.string().optional() }
+);
+
+registerDesignTool(
+  "create_variants",
+  "Combine components into a component set with variants. Name each component like 'Size=Large, State=Hover' (set via set_appearance name) before combining.",
+  { componentIds: z.array(z.string()), name: z.string().optional(), parentId: z.string().optional() }
+);
+
+registerDesignTool(
+  "create_style",
+  "Create a reusable style. kind PAINT (fills), TEXT (fontFamily, fontStyle|fontWeight, fontSize, lineHeight, letterSpacing, textCase), EFFECT (effects) or GRID (layoutGrids). Style names with slashes create groups, e.g. 'Brand/Primary'.",
+  {
+    kind: z.enum(["PAINT", "TEXT", "EFFECT", "GRID"]),
+    name: z.string(),
+    fills: z.array(z.any()).optional(),
+    effects: z.array(z.any()).optional(),
+    layoutGrids: z.array(z.any()).optional(),
+    fontFamily: z.string().optional(),
+    fontStyle: z.string().optional(),
+    fontWeight: z.number().optional(),
+    fontSize: z.number().optional(),
+    lineHeight: z.any().optional(),
+    letterSpacing: z.any().optional(),
+    textCase: z.string().optional(),
+    textDecoration: z.string().optional(),
+  }
+);
+
+registerDesignTool(
+  "apply_style",
+  "Apply an existing style (by styleId from create_style) to a node as FILL, STROKE, TEXT, EFFECT or GRID.",
+  { nodeId: z.string(), kind: z.enum(["FILL", "STROKE", "TEXT", "EFFECT", "GRID"]), styleId: z.string() }
+);
+
+registerDesignTool(
+  "create_variables",
+  "Create or update design tokens as Figma variables in a collection (colors, numbers for spacing/radius, strings, booleans). Supports modes (e.g. Light/Dark): give modes:['Light','Dark'] and per-variable values:{Light:'#fff',Dark:'#000'}; or a single value. Variable: {name:'color/primary', type:'COLOR'|'FLOAT'|'STRING'|'BOOLEAN', value?, values?, description?}",
+  {
+    collectionName: z.string(),
+    modes: z.array(z.string()).optional(),
+    variables: z.array(z.any()),
+  }
+);
+
+registerDesignTool(
+  "bind_variable",
+  "Bind a variable to a node property: field 'fills' or 'strokes' (color variable, optional index) or a numeric field such as itemSpacing, paddingLeft, cornerRadius, width, height, opacity.",
+  {
+    nodeId: z.string(),
+    variableId: z.string(),
+    field: z.string(),
+    index: z.number().optional(),
+  }
+);
+
+registerDesignTool(
+  "set_reactions",
+  "Set prototype interactions and animations on a node (replaces existing). Reaction: {trigger:{type:'ON_CLICK'|'ON_HOVER'|'ON_PRESS'|'ON_DRAG'|'MOUSE_ENTER'|'MOUSE_LEAVE'|'MOUSE_UP'|'MOUSE_DOWN'|'AFTER_TIMEOUT', timeout?:seconds}, actions:[{type:'NODE', destinationId, navigation:'NAVIGATE'|'OVERLAY'|'SWAP'|'SCROLL_TO'|'CHANGE_TO', transition:{type:'SMART_ANIMATE'|'DISSOLVE'|'MOVE_IN'|'MOVE_OUT'|'PUSH'|'SLIDE_IN'|'SLIDE_OUT', direction?:'LEFT'|'RIGHT'|'TOP'|'BOTTOM', duration: seconds, easing:{type:'EASE_IN'|'EASE_OUT'|'EASE_IN_AND_OUT'|'LINEAR'|'GENTLE'|'QUICK'|'BOUNCY'|'SLOW'}}, preserveScrollPosition?} | {type:'URL', url} | {type:'BACK'} | {type:'CLOSE'}]}",
+  { nodeId: z.string(), reactions: z.array(z.any()) }
+);
+
+registerDesignTool(
+  "set_flow_start",
+  "Mark a frame as a prototype flow starting point on the current page.",
+  { nodeId: z.string(), name: z.string().optional(), replace: z.boolean().optional() }
+);
+
+registerDesignTool(
+  "manage_pages",
+  "List, create, rename, delete pages or switch the current page.",
+  {
+    action: z.enum(["LIST", "CREATE", "SET_CURRENT", "RENAME", "DELETE"]),
+    name: z.string().optional(),
+    pageId: z.string().optional(),
+  }
+);
+
+registerDesignTool(
+  "list_fonts",
+  "List fonts available in Figma (optionally filtered by family substring) with their styles.",
+  { query: z.string().optional(), limit: z.number().optional() }
+);
+
+registerDesignTool(
+  "find_nodes",
+  "Find nodes on the current page (or inside parentId) by name substring and/or types (FRAME, TEXT, RECTANGLE, COMPONENT, ...).",
+  {
+    name: z.string().optional(),
+    types: z.array(z.string()).optional(),
+    parentId: z.string().optional(),
+    limit: z.number().optional(),
+  }
+);
+
 // Start the server
 async function main() {
   try {

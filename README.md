@@ -1,4 +1,64 @@
-# Talk to Figma MCP
+# Figma Designer MCP (Talk to Figma MCP + Designer Toolkit)
+
+**Let an AI agent (Claude Code, Cursor, OpenClaw and any MCP client) design in Figma: wireframes, UI screens, design systems and clickable prototypes with animations.** Works with a **free Figma account** and the desktop app.
+
+This is a fork of [grab/cursor-talk-to-figma-mcp](https://github.com/grab/cursor-talk-to-figma-mcp) (MIT). The original project reads designs and creates basic frames, rectangles and text. This fork adds a **Designer Toolkit**: typed commands for everything a web designer does, without ever executing arbitrary code.
+
+Keywords: MCP, Model Context Protocol, Figma plugin, AI agent, Claude Code, Cursor, design automation, wireframe, prototype, auto layout, design tokens, Figma variables, Smart Animate, web design.
+
+## Designer Toolkit (added in this fork)
+
+| Area | Tools |
+|---|---|
+| Shapes and graphics | `create_shape` (rectangle, ellipse, line, polygon, star, with rotation), `create_placeholder` (wireframe image box with crossed diagonals, caption and pixel size), `create_from_svg` (icons, logos, custom vectors) |
+| Appearance | `set_appearance` (fills, strokes, solid and linear/radial/angular/diamond gradients, corner radius, opacity, blend modes, masks, scroll overflow, rotation, size), `set_effects` (drop and inner shadows, layer blur, background blur for glassmorphism), `set_layout_grids` |
+| Text | `set_text_style` (font family and weight, size, line height, letter spacing, alignment, case, decoration, color, fixed-width wrapping) |
+| Layout | `set_auto_layout` (direction, wrap, spacing, padding, alignment, sizing, absolute positioning, min/max), `set_constraints` |
+| Structure | `arrange_nodes` (group, ungroup, boolean union/subtract/intersect/exclude, flatten, mask, z-order, reparent) |
+| Components | `create_component`, `create_variants` |
+| Design system | `create_style` (paint, text, effect, grid), `apply_style`, `create_variables` (color/number/string/boolean tokens with modes such as Light and Dark), `bind_variable` |
+| Prototyping and animation | `set_reactions` (click, hover, press, timeout triggers; navigate, overlay, swap, change-to; Smart Animate, dissolve, push, move, slide; durations and easing), `set_flow_start` |
+| Utilities | `manage_pages`, `list_fonts`, `find_nodes` |
+
+Colors accept `"#rrggbb"`, `"#rrggbbaa"` or `{r,g,b,a}` (0-1). Every command is typed and only applies documented Figma Plugin API properties.
+
+### Security
+
+The WebSocket relay listens on `localhost:3055` **without authentication**: any local program can send commands to the open Figma file. Do not expose the port. By design this fork has **no** "evaluate JavaScript" command, because that would turn the unauthenticated local port into a code-execution channel. If something is missing, add a typed command instead.
+
+### Status
+
+Verified on a live Figma file (free plan, desktop app): shapes, rotated lines, gradients with shadows, SVG import, wrapped text styling, auto layout, placeholders, font listing, node search, pages, and a Smart Animate prototype reaction. Written but not yet exercised in real use: variables and styles, component variants, boolean operations, masks, layout grids. Issues and pull requests are welcome.
+
+### Use it with AI agents
+
+See [AGENT_PASSPORT.md](AGENT_PASSPORT.md): setup, working order, tips, error table, and an unattended-launch procedure for agents that can control the desktop. A smoke test that exercises the toolkit lives in [scripts/smoke-test.js](scripts/smoke-test.js).
+
+**Important:** run the plugin from this repository (Plugins > Development > Import plugin from manifest > `src/cursor_mcp_plugin/manifest.json`), not the community version. The community build does not contain the Designer Toolkit commands and answers `Unknown command`. Point your MCP client at the local `src/talk_to_figma_mcp/server.ts`:
+
+```json
+{
+  "mcpServers": {
+    "TalkToFigma": {
+      "command": "bun",
+      "args": ["run", "/absolute/path/to/figma-designer-mcp/src/talk_to_figma_mcp/server.ts"]
+    }
+  }
+}
+```
+
+## Credits and legal
+
+- **Original project:** [grab/cursor-talk-to-figma-mcp](https://github.com/grab/cursor-talk-to-figma-mcp), MIT License, Copyright (c) 2025 [sonnylazuardi](https://github.com/sonnylazuardi). The relay, the plugin shell, the original MCP server and the base tools are their work, together with the contributors listed on the [upstream contributors page](https://github.com/grab/cursor-talk-to-figma-mcp/graphs/contributors) (for example [@dusskapark](https://github.com/dusskapark) for bulk text replacement and instance override propagation). Please star and support the original project.
+- **This fork:** the Designer Toolkit additions (see above), Copyright (c) 2026 [Aliskan85](https://github.com/Aliskan85), released under the same MIT License. The original copyright notice and license text are kept unchanged in [LICENSE](LICENSE).
+- **Dependencies:** [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk), [ws](https://github.com/websockets/ws), [zod](https://github.com/colinhacks/zod), [uuid](https://github.com/uuidjs/uuid), all MIT licensed.
+- **Trademarks:** Figma is a trademark of Figma, Inc. Claude is a trademark of Anthropic. Cursor is a trademark of Anysphere. This project is independent, is not affiliated with, endorsed by or sponsored by any of them, and uses their names only to describe compatibility.
+- **Plugin analytics:** the upstream plugin sends anonymous usage events (plugin opens, command names, success or error) to Google Analytics, as stated in `src/cursor_mcp_plugin/manifest.json` and the plugin's About tab. No file content or personal data is collected. Remove the Google Analytics domain from the manifest and the sending code if you do not want this.
+- **No warranty:** provided "as is" under the MIT License. Review the code before connecting it to important Figma files.
+
+---
+
+## Original project description
 
 This project implements a Model Context Protocol (MCP) integration between AI agent (Cursor, Claude Code) and Figma, allowing AI agent to communicate with Figma for reading designs and modifying them programmatically.
 

@@ -262,6 +262,49 @@ async function handleCommand(command, params) {
       return await createSection(params);
     case "set_parent":
       return await setParent(params);
+    // Designer toolkit
+    case "create_shape":
+      return await dtCreateShape(params);
+    case "create_placeholder":
+      return await dtCreatePlaceholder(params);
+    case "create_from_svg":
+      return await dtCreateFromSvg(params);
+    case "set_appearance":
+      return await dtSetAppearance(params);
+    case "set_effects":
+      return await dtSetEffects(params);
+    case "set_text_style":
+      return await dtSetTextStyle(params);
+    case "set_auto_layout":
+      return await dtSetAutoLayout(params);
+    case "set_constraints":
+      return await dtSetConstraints(params);
+    case "arrange_nodes":
+      return await dtArrangeNodes(params);
+    case "create_component":
+      return await dtCreateComponent(params);
+    case "create_variants":
+      return await dtCreateVariants(params);
+    case "create_style":
+      return await dtCreateStyle(params);
+    case "apply_style":
+      return await dtApplyStyle(params);
+    case "create_variables":
+      return await dtCreateVariables(params);
+    case "bind_variable":
+      return await dtBindVariable(params);
+    case "set_reactions":
+      return await dtSetReactions(params);
+    case "set_flow_start":
+      return await dtSetFlowStart(params);
+    case "manage_pages":
+      return await dtManagePages(params);
+    case "list_fonts":
+      return await dtListFonts(params);
+    case "find_nodes":
+      return await dtFindNodes(params);
+    case "set_layout_grids":
+      return await dtSetLayoutGrids(params);
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -4342,4 +4385,666 @@ async function setSelections(params) {
     notFoundIds: notFoundIds,
     message: `Selected ${nodes.length} nodes${notFoundIds.length > 0 ? ` (${notFoundIds.length} not found)` : ''}`
   };
+}
+
+// ===========================================================================
+// DESIGNER TOOLKIT
+// Typed commands covering what a web designer needs in Figma: shapes, lines,
+// rotation, fills/gradients, effects, text styles, auto layout, grouping and
+// boolean operations, components, styles, variables, prototyping, pages.
+// Every command only reads documented parameters and applies them through the
+// Figma Plugin API. Nothing here evaluates code.
+// ===========================================================================
+
+const DT_WEIGHTS = {
+  100: "Thin", 200: "Extra Light", 300: "Light", 400: "Regular", 500: "Medium",
+  600: "Semi Bold", 700: "Bold", 800: "Extra Bold", 900: "Black",
+};
+
+async function dtNode(id) {
+  if (!id) throw new Error("Missing nodeId");
+  const node = await figma.getNodeByIdAsync(id);
+  if (!node) throw new Error("Node not found: " + id);
+  return node;
+}
+
+async function dtParent(id) {
+  if (!id) return figma.currentPage;
+  const parent = await figma.getNodeByIdAsync(id);
+  if (!parent || !("appendChild" in parent)) throw new Error("Invalid parentId: " + id);
+  return parent;
+}
+
+function dtDescribe(node, extra) {
+  const info = { id: node.id, name: node.name, type: node.type };
+  if ("x" in node) { info.x = node.x; info.y = node.y; }
+  if ("width" in node) { info.width = node.width; info.height = node.height; }
+  if (extra) Object.assign(info, extra);
+  return info;
+}
+
+// "#rgb", "#rrggbb", "#rrggbbaa" or {r,g,b,a} with channels 0..1 -> {r,g,b,a}
+function dtColor(c) {
+  if (c === undefined || c === null) throw new Error("Missing color");
+  if (typeof c === "string") {
+    let h = c.replace("#", "").trim();
+    if (h.length === 3) h = h.split("").map((x) => x + x).join("");
+    if (h.length !== 6 && h.length !== 8) throw new Error("Bad hex color: " + c);
+    const n = (i) => parseInt(h.slice(i, i + 2), 16) / 255;
+    return { r: n(0), g: n(2), b: n(4), a: h.length === 8 ? n(6) : 1 };
+  }
+  return { r: c.r, g: c.g, b: c.b, a: c.a === undefined ? 1 : c.a };
+}
+
+// Gradient transform for a linear gradient at a CSS-style angle
+// (0 = to top, 90 = to right, 180 = to bottom, 270 = to left).
+function dtGradientTransform(type, angle) {
+  if (type !== "GRADIENT_LINEAR") return [[1, 0, 0], [0, 1, 0]];
+  const th = ((angle === undefined ? 180 : angle) * Math.PI) / 180;
+  const ax = Math.sin(th), ay = -Math.cos(th);
+  const p0x = 0.5 - ax / 2, p0y = 0.5 - ay / 2;
+  const bx = -ay, by = ax;
+  const tx = p0x - 0.5 * bx, ty = p0y - 0.5 * by;
+  const det = ax * by - bx * ay;
+  return [
+    [by / det, -bx / det, (bx * ty - by * tx) / det],
+    [-ay / det, ax / det, (ay * tx - ax * ty) / det],
+  ];
+}
+
+function dtPaint(p) {
+  if (typeof p === "string") {
+    const c = dtColor(p);
+    return { type: "SOLID", color: { r: c.r, g: c.g, b: c.b }, opacity: c.a };
+  }
+  if (!p || typeof p !== "object") throw new Error("Bad paint");
+  const type = p.type || "SOLID";
+  let paint;
+  if (type === "SOLID") {
+    const c = dtColor(p.color);
+    paint = {
+      type: "SOLID",
+      color: { r: c.r, g: c.g, b: c.b },
+      opacity: p.opacity !== undefined ? p.opacity : c.a,
+    };
+  } else if (
+    type === "GRADIENT_LINEAR" || type === "GRADIENT_RADIAL" ||
+    type === "GRADIENT_ANGULAR" || type === "GRADIENT_DIAMOND"
+  ) {
+    const stops = (p.stops || []).map((s) => {
+      const c = dtColor(s.color);
+      return {
+        position: s.position,
+        color: { r: c.r, g: c.g, b: c.b, a: s.opacity !== undefined ? s.opacity : c.a },
+      };
+    });
+    if (stops.length < 2) throw new Error("Gradient needs at least 2 stops");
+    paint = {
+      type: type,
+      gradientStops: stops,
+      gradientTransform: p.transform || dtGradientTransform(type, p.angle),
+      opacity: p.opacity !== undefined ? p.opacity : 1,
+    };
+  } else if (type === "IMAGE") {
+    return p; // already a real image paint (e.g. with imageHash)
+  } else {
+    throw new Error("Unsupported paint type: " + type);
+  }
+  if (p.visible === false) paint.visible = false;
+  if (p.blendMode) paint.blendMode = p.blendMode;
+  return paint;
+}
+
+function dtPaints(value) {
+  return (Array.isArray(value) ? value : [value]).map(dtPaint);
+}
+
+function dtEffect(e) {
+  const t = e.type;
+  if (t === "DROP_SHADOW" || t === "INNER_SHADOW") {
+    const c = dtColor(e.color || "#00000040");
+    const out = {
+      type: t,
+      color: { r: c.r, g: c.g, b: c.b, a: c.a },
+      offset: { x: e.offsetX || 0, y: e.offsetY || 0 },
+      radius: e.blur || 0,
+      spread: e.spread || 0,
+      visible: e.visible !== false,
+      blendMode: e.blendMode || "NORMAL",
+    };
+    if (t === "DROP_SHADOW") out.showShadowBehindNode = !!e.showBehind;
+    return out;
+  }
+  if (t === "LAYER_BLUR" || t === "BACKGROUND_BLUR") {
+    return { type: t, radius: e.radius || 0, visible: e.visible !== false };
+  }
+  throw new Error("Unsupported effect type: " + t);
+}
+
+function dtGrids(list) {
+  return list.map((g) => {
+    const c = dtColor(g.color || { r: 1, g: 0, b: 0, a: 0.1 });
+    const out = { pattern: g.pattern, visible: g.visible !== false, color: c };
+    if (g.pattern === "GRID") {
+      out.sectionSize = g.sectionSize || 8;
+    } else {
+      out.alignment = g.alignment || "STRETCH";
+      out.gutterSize = g.gutterSize === undefined ? 20 : g.gutterSize;
+      out.count = g.count === undefined ? 12 : g.count;
+      out.offset = g.offset === undefined ? 0 : g.offset;
+      if (g.sectionSize !== undefined) out.sectionSize = g.sectionSize;
+    }
+    return out;
+  });
+}
+
+async function dtLoadFont(family, styleOrWeight) {
+  let style = typeof styleOrWeight === "number"
+    ? (DT_WEIGHTS[styleOrWeight] || "Regular")
+    : (styleOrWeight || "Regular");
+  try {
+    await figma.loadFontAsync({ family: family, style: style });
+  } catch (e) {
+    const alt = style.replace(" ", "");
+    try {
+      await figma.loadFontAsync({ family: family, style: alt });
+      style = alt;
+    } catch (e2) {
+      throw new Error("Font not available: " + family + " / " + style + " (use list_fonts)");
+    }
+  }
+  return { family: family, style: style };
+}
+
+async function dtMakeText(parent, chars, opts) {
+  await figma.loadFontAsync({ family: "Inter", style: "Regular" });
+  const t = figma.createText();
+  parent.appendChild(t);
+  t.fontName = await dtLoadFont(opts.family || "Inter", opts.weight || 400);
+  t.fontSize = opts.size || 14;
+  t.characters = chars;
+  t.fills = dtPaints(opts.color || "#000000");
+  return t;
+}
+
+// Properties that may be set through set_appearance / create_shape.
+const DT_DIRECT_PROPS = [
+  "name", "visible", "locked", "opacity", "blendMode",
+  "cornerRadius", "topLeftRadius", "topRightRadius", "bottomLeftRadius", "bottomRightRadius",
+  "cornerSmoothing", "clipsContent", "isMask", "expanded",
+  "strokeWeight", "strokeTopWeight", "strokeBottomWeight", "strokeLeftWeight", "strokeRightWeight",
+  "strokeAlign", "strokeCap", "strokeJoin", "strokeMiterLimit", "dashPattern",
+  "overflowDirection", "constrainProportions",
+];
+
+async function dtApply(node, p) {
+  const failed = {};
+  const attempt = (key, fn) => {
+    try { fn(); } catch (e) { failed[key] = e && e.message ? e.message : String(e); }
+  };
+
+  if ((p.width !== undefined || p.height !== undefined) && "resize" in node) {
+    attempt("size", () => {
+      node.resize(
+        p.width !== undefined ? p.width : node.width,
+        p.height !== undefined ? p.height : node.height
+      );
+    });
+  }
+  for (const key of DT_DIRECT_PROPS) {
+    if (p[key] !== undefined && key in node) {
+      attempt(key, () => { node[key] = p[key]; });
+    }
+  }
+  if (p.fills !== undefined && "fills" in node) attempt("fills", () => { node.fills = dtPaints(p.fills); });
+  if (p.strokes !== undefined && "strokes" in node) attempt("strokes", () => { node.strokes = dtPaints(p.strokes); });
+  if (p.effects !== undefined && "effects" in node) attempt("effects", () => { node.effects = p.effects.map(dtEffect); });
+  if (p.rotation !== undefined && "rotation" in node) attempt("rotation", () => { node.rotation = p.rotation; });
+  if (p.x !== undefined && "x" in node) attempt("x", () => { node.x = p.x; });
+  if (p.y !== undefined && "y" in node) attempt("y", () => { node.y = p.y; });
+  return failed;
+}
+
+function dtFailedExtra(failed) {
+  return Object.keys(failed).length ? { failed: failed } : undefined;
+}
+
+// --- shapes ---------------------------------------------------------------
+
+async function dtCreateShape(p) {
+  const type = String(p.type || "").toUpperCase();
+  let node;
+  if (type === "RECTANGLE") node = figma.createRectangle();
+  else if (type === "ELLIPSE") node = figma.createEllipse();
+  else if (type === "LINE") node = figma.createLine();
+  else if (type === "POLYGON") node = figma.createPolygon();
+  else if (type === "STAR") node = figma.createStar();
+  else throw new Error("type must be RECTANGLE, ELLIPSE, LINE, POLYGON or STAR");
+
+  const parent = await dtParent(p.parentId);
+  parent.appendChild(node);
+
+  const props = Object.assign({}, p);
+  if (type === "LINE") {
+    node.resize(p.width || 100, 0);
+    delete props.width;
+    delete props.height;
+    if (props.strokes === undefined) props.strokes = ["#000000"];
+    if (props.strokeWeight === undefined) props.strokeWeight = 1;
+  }
+  if (type === "POLYGON" && p.pointCount) node.pointCount = p.pointCount;
+  if (type === "STAR") {
+    if (p.pointCount) node.pointCount = p.pointCount;
+    if (p.innerRadius !== undefined) node.innerRadius = p.innerRadius;
+  }
+  if (props.width === undefined && type !== "LINE") props.width = 100;
+  if (props.height === undefined && type !== "LINE") props.height = 100;
+  if (props.x === undefined) props.x = 0;
+  if (props.y === undefined) props.y = 0;
+
+  const failed = await dtApply(node, props);
+  return dtDescribe(node, dtFailedExtra(failed));
+}
+
+// Wireframe image placeholder: framed box with two diagonals and a caption.
+async function dtCreatePlaceholder(p) {
+  const w = p.width, h = p.height;
+  if (!w || !h) throw new Error("width and height are required");
+  const parent = await dtParent(p.parentId);
+  const stroke = dtPaints(p.stroke || "#000000");
+
+  const frame = figma.createFrame();
+  parent.appendChild(frame);
+  frame.name = p.name || "Placeholder " + w + "x" + h;
+  frame.resize(w, h);
+  frame.x = p.x || 0;
+  frame.y = p.y || 0;
+  frame.fills = dtPaints(p.fill || "#FFFFFF");
+  frame.strokes = stroke;
+  frame.strokeWeight = p.strokeWeight || 1;
+  frame.clipsContent = true;
+
+  const len = Math.sqrt(w * w + h * h);
+  const a = (Math.atan2(h, w) * 180) / Math.PI;
+
+  const l1 = figma.createLine();
+  frame.appendChild(l1);
+  l1.name = "Diagonal 1";
+  l1.resize(len, 0);
+  l1.strokes = stroke;
+  l1.strokeWeight = p.crossWeight || 1;
+  l1.rotation = -a;
+  l1.x = 0;
+  l1.y = 0;
+
+  const l2 = figma.createLine();
+  frame.appendChild(l2);
+  l2.name = "Diagonal 2";
+  l2.resize(len, 0);
+  l2.strokes = stroke;
+  l2.strokeWeight = p.crossWeight || 1;
+  l2.rotation = a - 180;
+  l2.x = w;
+  l2.y = 0;
+
+  let labelId;
+  if (p.label !== false) {
+    const label = figma.createFrame();
+    frame.appendChild(label);
+    label.name = "Caption";
+    label.layoutMode = "VERTICAL";
+    label.primaryAxisSizingMode = "AUTO";
+    label.counterAxisSizingMode = "AUTO";
+    label.primaryAxisAlignItems = "CENTER";
+    label.counterAxisAlignItems = "CENTER";
+    label.paddingTop = 8; label.paddingBottom = 8; label.paddingLeft = 16; label.paddingRight = 16;
+    label.itemSpacing = 4;
+    label.fills = dtPaints(p.fill || "#FFFFFF");
+    label.strokes = stroke;
+    label.strokeWeight = p.strokeWeight || 1;
+    await dtMakeText(label, p.label || "Image", { size: p.labelSize || 15, weight: 600 });
+    await dtMakeText(label, w + " × " + h + " px", { size: (p.labelSize || 15) - 1, weight: 400, color: "#555555" });
+    label.x = Math.round((w - label.width) / 2);
+    label.y = Math.round((h - label.height) / 2);
+    labelId = label.id;
+  }
+  return dtDescribe(frame, { labelId: labelId });
+}
+
+async function dtCreateFromSvg(p) {
+  if (typeof p.svg !== "string") throw new Error("Missing svg parameter");
+  const node = figma.createNodeFromSvg(p.svg);
+  const parent = await dtParent(p.parentId);
+  parent.appendChild(node);
+  if (p.name) node.name = p.name;
+  if (p.width && node.width) node.rescale(p.width / node.width);
+  if (p.x !== undefined) node.x = p.x;
+  if (p.y !== undefined) node.y = p.y;
+  return dtDescribe(node);
+}
+
+// --- appearance -----------------------------------------------------------
+
+async function dtSetAppearance(p) {
+  const node = await dtNode(p.nodeId);
+  const failed = await dtApply(node, p);
+  return dtDescribe(node, dtFailedExtra(failed));
+}
+
+async function dtSetEffects(p) {
+  const node = await dtNode(p.nodeId);
+  if (!Array.isArray(p.effects)) throw new Error("effects must be an array");
+  node.effects = p.effects.map(dtEffect);
+  return dtDescribe(node, { effects: p.effects.length });
+}
+
+async function dtSetLayoutGrids(p) {
+  const node = await dtNode(p.nodeId);
+  if (!Array.isArray(p.layoutGrids)) throw new Error("layoutGrids must be an array");
+  node.layoutGrids = dtGrids(p.layoutGrids);
+  return dtDescribe(node, { grids: p.layoutGrids.length });
+}
+
+async function dtSetConstraints(p) {
+  const node = await dtNode(p.nodeId);
+  node.constraints = {
+    horizontal: p.horizontal || node.constraints.horizontal,
+    vertical: p.vertical || node.constraints.vertical,
+  };
+  return dtDescribe(node, { constraints: node.constraints });
+}
+
+// --- text -----------------------------------------------------------------
+
+function dtLineHeight(v) {
+  if (v === "AUTO") return { unit: "AUTO" };
+  if (typeof v === "number") return { value: v, unit: "PIXELS" };
+  return v;
+}
+
+function dtLetterSpacing(v) {
+  if (typeof v === "number") return { value: v, unit: "PIXELS" };
+  return v;
+}
+
+async function dtSetTextStyle(p) {
+  const node = await dtNode(p.nodeId);
+  if (node.type !== "TEXT") throw new Error("Node is not a text node");
+  if (node.fontName !== figma.mixed) await figma.loadFontAsync(node.fontName);
+
+  if (p.fontFamily || p.fontStyle || p.fontWeight) {
+    const cur = node.fontName !== figma.mixed ? node.fontName : { family: "Inter", style: "Regular" };
+    node.fontName = await dtLoadFont(
+      p.fontFamily || cur.family,
+      p.fontStyle || p.fontWeight || cur.style
+    );
+  }
+  if (p.characters !== undefined) node.characters = p.characters;
+  if (p.fontSize !== undefined) node.fontSize = p.fontSize;
+  if (p.lineHeight !== undefined) node.lineHeight = dtLineHeight(p.lineHeight);
+  if (p.letterSpacing !== undefined) node.letterSpacing = dtLetterSpacing(p.letterSpacing);
+  if (p.textAlignHorizontal) node.textAlignHorizontal = p.textAlignHorizontal;
+  if (p.textAlignVertical) node.textAlignVertical = p.textAlignVertical;
+  if (p.textCase) node.textCase = p.textCase;
+  if (p.textDecoration) node.textDecoration = p.textDecoration;
+  if (p.paragraphSpacing !== undefined) node.paragraphSpacing = p.paragraphSpacing;
+  if (p.paragraphIndent !== undefined) node.paragraphIndent = p.paragraphIndent;
+  if (p.textAutoResize) node.textAutoResize = p.textAutoResize;
+  if (p.fills !== undefined) node.fills = dtPaints(p.fills);
+  // Fixed width with wrapping text
+  if (p.width !== undefined) {
+    node.textAutoResize = "HEIGHT";
+    node.resize(p.width, node.height);
+  }
+  return dtDescribe(node);
+}
+
+// --- auto layout ----------------------------------------------------------
+
+const DT_LAYOUT_PROPS = [
+  "layoutWrap", "itemSpacing", "counterAxisSpacing",
+  "paddingLeft", "paddingRight", "paddingTop", "paddingBottom",
+  "primaryAxisAlignItems", "counterAxisAlignItems", "counterAxisAlignContent",
+  "primaryAxisSizingMode", "counterAxisSizingMode",
+  "layoutSizingHorizontal", "layoutSizingVertical",
+  "layoutPositioning", "layoutAlign", "layoutGrow",
+  "minWidth", "maxWidth", "minHeight", "maxHeight",
+  "itemReverseZIndex", "strokesIncludedInLayout",
+];
+
+async function dtSetAutoLayout(p) {
+  const node = await dtNode(p.nodeId);
+  const failed = {};
+  if (p.layoutMode !== undefined) node.layoutMode = p.layoutMode;
+  for (const key of DT_LAYOUT_PROPS) {
+    if (p[key] !== undefined && key in node) {
+      try { node[key] = p[key]; } catch (e) { failed[key] = e.message || String(e); }
+    }
+  }
+  return dtDescribe(node, dtFailedExtra(failed));
+}
+
+// --- structure ------------------------------------------------------------
+
+async function dtArrangeNodes(p) {
+  const action = String(p.action || "").toUpperCase();
+  const nodes = [];
+  for (const id of p.nodeIds || []) nodes.push(await dtNode(id));
+  if (!nodes.length) throw new Error("nodeIds is required");
+  const parent = p.parentId ? await dtParent(p.parentId) : nodes[0].parent;
+
+  if (action === "GROUP") {
+    return dtDescribe(figma.group(nodes, parent, p.index));
+  }
+  if (action === "UNGROUP") {
+    const out = [];
+    for (const n of nodes) out.push(...figma.ungroup(n).map((c) => c.id));
+    return { ungrouped: out };
+  }
+  if (action === "BOOLEAN_UNION") return dtDescribe(figma.union(nodes, parent, p.index));
+  if (action === "BOOLEAN_SUBTRACT") return dtDescribe(figma.subtract(nodes, parent, p.index));
+  if (action === "BOOLEAN_INTERSECT") return dtDescribe(figma.intersect(nodes, parent, p.index));
+  if (action === "BOOLEAN_EXCLUDE") return dtDescribe(figma.exclude(nodes, parent, p.index));
+  if (action === "FLATTEN") return dtDescribe(figma.flatten(nodes, parent, p.index));
+  if (action === "MASK") {
+    // The first node is the mask shape, the rest are masked by it
+    nodes[0].isMask = true;
+    return dtDescribe(figma.group(nodes, parent, p.index), { note: "first node is the mask" });
+  }
+  if (action === "BRING_TO_FRONT") {
+    for (const n of nodes) n.parent.appendChild(n);
+    return { moved: nodes.length };
+  }
+  if (action === "SEND_TO_BACK") {
+    for (const n of nodes.slice().reverse()) n.parent.insertChild(0, n);
+    return { moved: nodes.length };
+  }
+  if (action === "REORDER") {
+    if (p.index === undefined) throw new Error("index is required for REORDER");
+    nodes[0].parent.insertChild(p.index, nodes[0]);
+    return dtDescribe(nodes[0]);
+  }
+  if (action === "SET_PARENT") {
+    for (const n of nodes) parent.appendChild(n);
+    return { moved: nodes.length, parentId: parent.id };
+  }
+  throw new Error(
+    "action must be GROUP, UNGROUP, BOOLEAN_UNION, BOOLEAN_SUBTRACT, BOOLEAN_INTERSECT, " +
+    "BOOLEAN_EXCLUDE, FLATTEN, MASK, BRING_TO_FRONT, SEND_TO_BACK, REORDER or SET_PARENT"
+  );
+}
+
+// --- components -----------------------------------------------------------
+
+async function dtCreateComponent(p) {
+  const node = await dtNode(p.nodeId);
+  const component = figma.createComponentFromNode(node);
+  if (p.name) component.name = p.name;
+  return dtDescribe(component);
+}
+
+async function dtCreateVariants(p) {
+  const comps = [];
+  for (const id of p.componentIds || []) comps.push(await dtNode(id));
+  if (comps.length < 1) throw new Error("componentIds is required");
+  const parent = p.parentId ? await dtParent(p.parentId) : comps[0].parent;
+  const set = figma.combineAsVariants(comps, parent);
+  if (p.name) set.name = p.name;
+  return dtDescribe(set, { variantIds: set.children.map((c) => c.id) });
+}
+
+// --- styles and variables (design system) -----------------------------------
+
+async function dtCreateStyle(p) {
+  const kind = String(p.kind || "").toUpperCase();
+  let style;
+  if (kind === "PAINT") {
+    style = figma.createPaintStyle();
+    style.paints = dtPaints(p.fills);
+  } else if (kind === "EFFECT") {
+    style = figma.createEffectStyle();
+    style.effects = p.effects.map(dtEffect);
+  } else if (kind === "GRID") {
+    style = figma.createGridStyle();
+    style.layoutGrids = dtGrids(p.layoutGrids);
+  } else if (kind === "TEXT") {
+    style = figma.createTextStyle();
+    style.fontName = await dtLoadFont(p.fontFamily || "Inter", p.fontStyle || p.fontWeight || 400);
+    if (p.fontSize !== undefined) style.fontSize = p.fontSize;
+    if (p.lineHeight !== undefined) style.lineHeight = dtLineHeight(p.lineHeight);
+    if (p.letterSpacing !== undefined) style.letterSpacing = dtLetterSpacing(p.letterSpacing);
+    if (p.textCase) style.textCase = p.textCase;
+    if (p.textDecoration) style.textDecoration = p.textDecoration;
+  } else {
+    throw new Error("kind must be PAINT, TEXT, EFFECT or GRID");
+  }
+  style.name = p.name;
+  return { id: style.id, name: style.name, kind: kind };
+}
+
+async function dtApplyStyle(p) {
+  const node = await dtNode(p.nodeId);
+  const kind = String(p.kind || "").toUpperCase();
+  if (kind === "FILL") await node.setFillStyleIdAsync(p.styleId);
+  else if (kind === "STROKE") await node.setStrokeStyleIdAsync(p.styleId);
+  else if (kind === "TEXT") await node.setTextStyleIdAsync(p.styleId);
+  else if (kind === "EFFECT") await node.setEffectStyleIdAsync(p.styleId);
+  else if (kind === "GRID") await node.setGridStyleIdAsync(p.styleId);
+  else throw new Error("kind must be FILL, STROKE, TEXT, EFFECT or GRID");
+  return dtDescribe(node, { appliedStyleId: p.styleId });
+}
+
+async function dtCreateVariables(p) {
+  if (!p.collectionName) throw new Error("collectionName is required");
+  const collections = await figma.variables.getLocalVariableCollectionsAsync();
+  let col = collections.find((c) => c.name === p.collectionName);
+  if (!col) col = figma.variables.createVariableCollection(p.collectionName);
+
+  const modes = p.modes || [];
+  if (modes.length) {
+    col.renameMode(col.modes[0].modeId, modes[0]);
+    for (let i = 1; i < modes.length; i++) {
+      if (!col.modes.find((m) => m.name === modes[i])) col.addMode(modes[i]);
+    }
+  }
+  const modeByName = {};
+  col.modes.forEach((m) => { modeByName[m.name] = m.modeId; });
+
+  const existing = await figma.variables.getLocalVariablesAsync();
+  const out = [];
+  for (const v of p.variables || []) {
+    let variable = existing.find((x) => x.name === v.name && x.variableCollectionId === col.id);
+    if (!variable) variable = figma.variables.createVariable(v.name, col, v.type);
+    if (v.description) variable.description = v.description;
+    const conv = (val) => (v.type === "COLOR" ? dtColor(val) : val);
+    if (v.values && typeof v.values === "object") {
+      for (const modeName of Object.keys(v.values)) {
+        if (!modeByName[modeName]) throw new Error("Unknown mode: " + modeName);
+        variable.setValueForMode(modeByName[modeName], conv(v.values[modeName]));
+      }
+    } else if (v.value !== undefined) {
+      variable.setValueForMode(col.modes[0].modeId, conv(v.value));
+    }
+    out.push({ id: variable.id, name: variable.name, type: variable.resolvedType });
+  }
+  return { collectionId: col.id, modes: col.modes, variables: out };
+}
+
+async function dtBindVariable(p) {
+  const node = await dtNode(p.nodeId);
+  const variable = await figma.variables.getVariableByIdAsync(p.variableId);
+  if (!variable) throw new Error("Variable not found: " + p.variableId);
+  if (p.field === "fills" || p.field === "strokes") {
+    const paints = JSON.parse(JSON.stringify(node[p.field]));
+    const idx = p.index || 0;
+    if (!paints[idx]) throw new Error("No paint at index " + idx);
+    paints[idx] = figma.variables.setBoundVariableForPaint(paints[idx], "color", variable);
+    node[p.field] = paints;
+  } else {
+    node.setBoundVariable(p.field, variable);
+  }
+  return dtDescribe(node, { bound: p.field, variableId: p.variableId });
+}
+
+// --- prototyping and animation ------------------------------------------------
+
+async function dtSetReactions(p) {
+  const node = await dtNode(p.nodeId);
+  if (!Array.isArray(p.reactions)) throw new Error("reactions must be an array");
+  await node.setReactionsAsync(p.reactions);
+  return dtDescribe(node, { reactions: p.reactions.length });
+}
+
+async function dtSetFlowStart(p) {
+  const node = await dtNode(p.nodeId);
+  const page = figma.currentPage;
+  const points = p.replace ? [] : page.flowStartingPoints.slice();
+  points.push({ nodeId: node.id, name: p.name || node.name });
+  page.flowStartingPoints = points;
+  return { flows: page.flowStartingPoints };
+}
+
+// --- pages, fonts, search -------------------------------------------------------
+
+async function dtManagePages(p) {
+  const action = String(p.action || "LIST").toUpperCase();
+  if (action === "LIST") {
+    return { current: figma.currentPage.id, pages: figma.root.children.map((x) => ({ id: x.id, name: x.name })) };
+  }
+  if (action === "CREATE") {
+    const page = figma.createPage();
+    page.name = p.name || "Page";
+    return { id: page.id, name: page.name };
+  }
+  const page = await figma.getNodeByIdAsync(p.pageId);
+  if (!page || page.type !== "PAGE") throw new Error("pageId must be a page id");
+  if (action === "SET_CURRENT") { await figma.setCurrentPageAsync(page); return { current: page.id }; }
+  if (action === "RENAME") { page.name = p.name; return { id: page.id, name: page.name }; }
+  if (action === "DELETE") { page.remove(); return { deleted: p.pageId }; }
+  throw new Error("action must be LIST, CREATE, SET_CURRENT, RENAME or DELETE");
+}
+
+async function dtListFonts(p) {
+  const fonts = await figma.listAvailableFontsAsync();
+  const q = (p.query || "").toLowerCase();
+  const byFamily = {};
+  for (const f of fonts) {
+    const family = f.fontName.family;
+    if (q && family.toLowerCase().indexOf(q) === -1) continue;
+    if (!byFamily[family]) byFamily[family] = [];
+    byFamily[family].push(f.fontName.style);
+  }
+  return Object.keys(byFamily).slice(0, p.limit || 60).map((fam) => ({ family: fam, styles: byFamily[fam] }));
+}
+
+async function dtFindNodes(p) {
+  const root = p.parentId ? await dtNode(p.parentId) : figma.currentPage;
+  if (root.type === "PAGE") await root.loadAsync();
+  const types = p.types;
+  const q = (p.name || "").toLowerCase();
+  const found = root.findAll((n) =>
+    (!types || types.indexOf(n.type) !== -1) &&
+    (!q || n.name.toLowerCase().indexOf(q) !== -1)
+  );
+  return found.slice(0, p.limit || 100).map((n) => dtDescribe(n));
 }
